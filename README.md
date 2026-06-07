@@ -35,6 +35,8 @@ Tear down with `make down` (keeps the cluster). Override the provider with
 
 ## Architecture
 
+> Full diagrams (components, lifecycle, web/cron/telegram flows): **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+
 ```
  user ──http──▶ control plane (ns oc-system)
                  ├─ auth        signup/login, bcrypt, signed-cookie sessions (stateless)
