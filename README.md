@@ -138,7 +138,7 @@ openclaw.yaml   optional standalone single-instance example (not used by the con
 | `USERS_NS` | `oc-users` | Namespace for per-user resources |
 | `SHARED_KEY_SECRET` | `oc-shared-anthropic` | Secret (in `USERS_NS`) with key `anthropic-key` |
 | `DEFAULT_MODEL` | `anthropic/claude-sonnet-4-6` | Model set during onboarding |
-| `IDLE_TIMEOUT` | `15m` | Idle time before scale-to-zero |
+| `IDLE_TIMEOUT` | `10m` | Idle time before scale-to-zero |
 | `COLD_START_TIMEOUT` | `90s` | Max wait for a pod to become ready on wake |
 | `COOKIE_KEY` | (from secret) | HMAC key for session cookies |
 

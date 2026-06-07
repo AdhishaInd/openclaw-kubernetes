@@ -36,7 +36,7 @@ spec:
             - name: DEFAULT_MODEL
               value: "anthropic/claude-sonnet-4-6"
             - name: IDLE_TIMEOUT
-              value: "15m"
+              value: "10m"
             - name: COLD_START_TIMEOUT
               value: "90s"
             # Cron (Phase 2): the in-pod scheduler fires jobs; the control plane wakes
