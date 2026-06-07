@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: controlplane
+  namespace: oc-system
+---
+# Scoped to the oc-users namespace: the control plane manages per-user resources here only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: controlplane
+  namespace: oc-users
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["services", "persistentvolumeclaims", "secrets"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: controlplane
+  namespace: oc-users
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: controlplane
+subjects:
+  - kind: ServiceAccount
+    name: controlplane
+    namespace: oc-system

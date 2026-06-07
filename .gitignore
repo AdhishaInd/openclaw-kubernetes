@@ -1,0 +1,15 @@
+# Local secrets / artifacts — never commit
+.gateway-token
+*.cookies
+.env
+
+# Local tooling state
+.claude/
+
+# Build output
+controlplane/cp
+/tmp/
+
+# OS / editor
+.DS_Store
+*.swp

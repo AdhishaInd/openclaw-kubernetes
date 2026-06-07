@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controlplane
+  namespace: oc-system
+  labels:
+    app: controlplane
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: controlplane
+  template:
+    metadata:
+      labels:
+        app: controlplane
+    spec:
+      serviceAccountName: controlplane
+      containers:
+        - name: controlplane
+          image: openclaw-controlplane:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: LISTEN_ADDR
+              value: ":8080"
+            # PUBLIC_ORIGIN must match the URL the browser uses to reach the control plane.
+            # For the port-forward POC this is http://localhost:8080.
+            - name: PUBLIC_ORIGIN
+              value: "http://localhost:8080"
+            - name: USERS_NS
+              value: "oc-users"
+            - name: SHARED_KEY_SECRET
+              value: "oc-shared-anthropic"
+            - name: DEFAULT_MODEL
+              value: "anthropic/claude-sonnet-4-6"
+            - name: IDLE_TIMEOUT
+              value: "15m"
+            - name: COLD_START_TIMEOUT
+              value: "90s"
+            - name: COOKIE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: oc-controlplane
+                  key: cookie-key
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65532   # distroless 'nonroot' uid
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: controlplane
+  namespace: oc-system
+spec:
+  selector:
+    app: controlplane
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

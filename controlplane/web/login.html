@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenClaw — Log in</title>
+<style>
+  body{font-family:system-ui,sans-serif;background:#0f1115;color:#e6e6e6;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
+  .card{background:#181b22;padding:2rem;border-radius:12px;width:320px;box-shadow:0 8px 30px rgba(0,0,0,.4)}
+  h1{font-size:1.25rem;margin:0 0 1rem}
+  label{display:block;font-size:.8rem;margin:.75rem 0 .25rem;color:#9aa4b2}
+  input{width:100%;box-sizing:border-box;padding:.6rem;border:1px solid #2a2f3a;border-radius:8px;background:#0f1115;color:#e6e6e6}
+  button{width:100%;margin-top:1.25rem;padding:.65rem;border:0;border-radius:8px;background:#5b8cff;color:#fff;font-weight:600;cursor:pointer}
+  .err{color:#ff7a7a;font-size:.8rem;margin-top:.75rem}
+  .alt{margin-top:1rem;font-size:.8rem;color:#9aa4b2;text-align:center}
+  a{color:#5b8cff}
+</style>
+</head>
+<body>
+  <form class="card" method="post" action="/login">
+    <h1>Log in to OpenClaw</h1>
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" autocomplete="email" required>
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+    {{with .}}{{if .Error}}<div class="err">{{.Error}}</div>{{end}}{{end}}
+    <button type="submit">Log in</button>
+    <div class="alt">No account? <a href="/signup">Sign up</a></div>
+  </form>
+</body>
+</html>

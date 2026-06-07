@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: oc-system   # control plane
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: oc-users    # per-user OpenClaw instances

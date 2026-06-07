@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Fallback for no-JS: slow reload. JS below reloads the instant the pod is ready. -->
+<meta http-equiv="refresh" content="10">
+<title>Starting your OpenClaw…</title>
+<style>
+  body{font-family:system-ui,sans-serif;background:#0f1115;color:#e6e6e6;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
+  .box{text-align:center}
+  .spin{width:38px;height:38px;margin:0 auto 1rem;border:4px solid #2a2f3a;border-top-color:#5b8cff;border-radius:50%;animation:r 1s linear infinite}
+  @keyframes r{to{transform:rotate(360deg)}}
+  p{color:#9aa4b2}
+  .t{color:#6b7280;font-size:.8rem;margin-top:.5rem}
+</style>
+</head>
+<body>
+  <div class="box">
+    <div class="spin"></div>
+    <h1>Waking your instance…</h1>
+    <p>First start can take ~60–90s (pulling image + onboarding).</p>
+    <p class="t" id="t"></p>
+  </div>
+  <script>
+  (function () {
+    var start = Date.now();
+    var el = document.getElementById('t');
+    function tick(){ if(el) el.textContent = Math.round((Date.now()-start)/1000) + 's'; }
+    setInterval(tick, 1000); tick();
+    function check() {
+      fetch('/__oc-ready', { cache: 'no-store' })
+        .then(function (r) { if (r.status === 200) location.reload(); })
+        .catch(function () {});
+    }
+    setInterval(check, 1500);
+    check();
+  })();
+  </script>
+</body>
+</html>

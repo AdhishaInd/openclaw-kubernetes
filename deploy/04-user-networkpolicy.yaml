@@ -1,0 +1,38 @@
+# Isolates per-user OpenClaw pods. NOTE: enforcement requires a NetworkPolicy-capable
+# CNI. minikube's default bridge CNI does NOT enforce these — start minikube with
+# `--cni=calico` (or cilium) for real enforcement. The policy is declared regardless
+# so the intent travels with the manifests.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: user-isolation
+  namespace: oc-users
+spec:
+  podSelector:
+    matchLabels:
+      app: openclaw-user
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    # Only the control plane may reach the gateway port.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: oc-system
+      ports:
+        - protocol: TCP
+          port: 18789
+  egress:
+    # DNS resolution.
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Internet (e.g. Anthropic API) but NOT other in-cluster pods/services:
+    # blocks user-pod-to-user-pod lateral traffic.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.244.0.0/16   # pod CIDR (minikube default)
+              - 10.96.0.0/12    # service CIDR (minikube default)
