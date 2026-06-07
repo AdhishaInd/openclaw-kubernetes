@@ -61,24 +61,25 @@ Tear down with `make down` (keeps the cluster). Override the provider with
 ### Cron with scale-to-zero (Phase 2)
 
 OpenClaw's cron scheduler runs *inside* the gateway and does not catch up missed
-slots — so a pod scaled to zero would never fire its jobs. Instead, the control
-plane is the **sole cron driver**:
+slots — so a pod scaled to zero would never fire its jobs. The gateway's own
+scheduler still does the firing (no double-fire, no CLI scope issues); the control
+plane just makes sure the pod is **running before each slot**:
 
-- The in-pod scheduler is disabled at onboarding (`cron.enabled=false`), so there
-  is no natural firing (hence no double-fire).
-- While a pod is awake (and once more just before the reaper sleeps it), the
+- The in-pod scheduler stays enabled, so **warm pods fire their jobs natively**.
+- While a pod is awake — and once more just before the reaper sleeps it — the
   control plane reads `cron list --json` and stamps the earliest next-fire time
   onto the Deployment (`openclaw.io/cron-next`).
-- A scheduler loop wakes a sleeping pod when a job is due and **force-runs** it
-  (`cron run <id>`), then advances the mirror and releases the pod back to the
-  reaper. A guard annotation stops the reaper from sleeping a pod mid-run.
+- For a **sleeping** pod, a scheduler loop wakes it `CRON_WAKE_LEAD` *before* its
+  slot and holds it (a guard annotation stops the reaper from sleeping it) until
+  the slot passes, so the in-pod scheduler fires it; then it advances the mirror and
+  releases the pod.
 
-Net effect: a cron user's pod only wakes around its scheduled times (plus the run
-and a short grace), so **scale-to-zero is preserved**. Cold-start time just delays
-a run by a few tens of seconds — it can't cause a miss. Knobs: `CRON_TICK`,
-`CRON_WAKE_LEAD`, `REAPER_TICK` (see the Deployment). Verify with `make verify-cron`
-(no browser). Note: headless cron should use `--webhook` (or a channel) for
-delivery, since the default "post to last chat channel" has nowhere to go.
+Net effect: a cron user's pod only wakes around its scheduled times, so
+**scale-to-zero is preserved**. `CRON_WAKE_LEAD` (default 3m) must exceed cold start
+so the pod is ready before the slot. Knobs: `CRON_TICK`, `CRON_WAKE_LEAD`,
+`REAPER_TICK` (see the Deployment). Verify with `make verify-cron` (no browser).
+Headless cron should use `--webhook` (or a channel) for delivery, since the default
+"post to last chat channel" has nowhere to go.
 
 ### Telegram with scale-to-zero (Phase 3)
 

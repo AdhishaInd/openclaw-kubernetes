@@ -287,10 +287,6 @@ node openclaw.mjs config set gateway.controlUi.allowedOrigins "[\"$PUBLIC_ORIGIN
 # (the in-pod CLI can't see the live gateway's pending requests), so this is the only
 # workable option for self-serve.
 node openclaw.mjs config set gateway.controlUi.dangerouslyDisableDeviceAuth true
-# Disable the in-pod cron scheduler: the control plane is the sole cron driver
-# (it wakes the pod and force-runs due jobs), which is what makes cron work with
-# scale-to-zero without missed or double runs.
-node openclaw.mjs config set cron.enabled false
 echo "onboarded"`
 
 	env := []corev1.EnvVar{

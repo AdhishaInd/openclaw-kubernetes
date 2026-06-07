@@ -104,30 +104,38 @@ func (s *Server) cronTick(ctx context.Context) {
 	}
 	now := time.Now()
 	for _, d := range deps {
+		id := d.Labels[labelUser]
+		if d.Annotations[annBusy] == "1" {
+			continue // busy with cron/webhook work already
+		}
+		// Warm pods run their own cron via the in-pod scheduler; nothing to do here.
+		if d.Spec.Replicas != nil && *d.Spec.Replicas > 0 {
+			continue
+		}
+		// Sleeping pod: wake it shortly BEFORE its next slot so the in-pod scheduler
+		// is running to fire the job (missed slots are not caught up). The mirrored
+		// next-fire time was stamped when the pod was last awake.
 		nextStr := d.Annotations[annCronNext]
 		if nextStr == "" {
 			continue
 		}
-		nextMs, err := strconv.ParseInt(nextStr, 10, 64)
-		if err != nil {
+		nextMs, perr := strconv.ParseInt(nextStr, 10, 64)
+		if perr != nil {
 			continue
 		}
-		asleep := d.Spec.Replicas == nil || *d.Spec.Replicas == 0
-		running := d.Annotations[annBusy] == "1"
-		// Wake once the slot is due (within a small lead). The in-pod scheduler is
-		// disabled, so we force-run due jobs ourselves after the pod is ready —
-		// cold-start time just delays the run slightly, it can't cause a miss.
-		if asleep && !running && time.UnixMilli(nextMs).Before(now.Add(s.cfg.CronWakeLead)) {
-			go s.wakeForCron(d.Labels[labelUser])
+		if time.UnixMilli(nextMs).Add(-s.cfg.CronWakeLead).Before(now) {
+			go s.wakeForCron(id, nextMs)
 		}
 	}
 }
 
-// wakeForCron wakes a sleeping pod, force-runs any due cron jobs, refreshes the
-// mirror to their next occurrence, then releases it for the reaper.
-func (s *Server) wakeForCron(id string) {
+// wakeForCron wakes a sleeping pod ahead of a cron slot and holds it up through the
+// slot so the in-pod scheduler fires the job, then refreshes the mirror to the next
+// occurrence and releases the pod for the reaper. No `cron run` (which needs CLI
+// device-scope approval) — the gateway's own scheduler does the firing.
+func (s *Server) wakeForCron(id string, nextMs int64) {
 	ctx, cancel := context.WithTimeout(context.Background(),
-		s.cfg.ColdStartTimeout+s.cfg.CronRunBuffer+2*time.Minute)
+		s.cfg.ColdStartTimeout+s.cfg.CronWakeLead+s.cfg.CronRunBuffer+2*time.Minute)
 	defer cancel()
 
 	one := "1"
@@ -135,37 +143,22 @@ func (s *Server) wakeForCron(id string) {
 		log.Printf("cron wake guard user=%s: %v", id, err)
 		return
 	}
-	defer s.k8s.setAnnotations(ctx, id, map[string]*string{annBusy: nil})
+	defer s.k8s.setAnnotations(context.Background(), id, map[string]*string{annBusy: nil})
 
-	log.Printf("cron wake user=%s", id)
+	log.Printf("cron wake user=%s for slot %s", id, time.UnixMilli(nextMs).UTC().Format(time.RFC3339))
 	if !s.wakeAndWait(ctx, id) {
 		log.Printf("cron wake user=%s: pod not ready in time", id)
 		return
 	}
-	s.runDueJobs(ctx, id)
-	// Advance the mirror to the next occurrence; reaper scales the pod down since
-	// the cron wake never touched last-activity.
-	s.refreshMirror(ctx, id)
+	// Hold until the slot has passed plus a buffer so the in-pod scheduler fires it.
+	fireBy := time.UnixMilli(nextMs).Add(s.cfg.CronRunBuffer)
+	if d := time.Until(fireBy); d > 0 {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(d):
+		}
+	}
+	s.refreshMirror(ctx, id) // advance cron-next to the next occurrence
 	log.Printf("cron wake user=%s done; released for reaper", id)
-}
-
-// runDueJobs force-runs every enabled job whose next-fire time has arrived.
-func (s *Server) runDueJobs(ctx context.Context, id string) {
-	jobs, err := s.listJobs(ctx, id)
-	if err != nil {
-		log.Printf("cron runDue list user=%s: %v", id, err)
-		return
-	}
-	now := time.Now().UnixMilli()
-	for _, j := range jobs {
-		if !j.Enabled || j.State.NextRunAtMs == 0 || j.State.NextRunAtMs > now {
-			continue
-		}
-		if _, err := s.k8s.execInGateway(ctx, id, "node", "openclaw.mjs", "cron", "run", j.ID,
-			"--wait", "--wait-timeout", "60000"); err != nil {
-			log.Printf("cron run user=%s job=%s: %v", id, j.ID, err)
-			continue
-		}
-		log.Printf("cron fired user=%s job=%s", id, j.ID)
-	}
 }

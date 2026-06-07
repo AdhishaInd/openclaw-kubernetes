@@ -39,15 +39,15 @@ spec:
               value: "15m"
             - name: COLD_START_TIMEOUT
               value: "90s"
-            # Cron (Phase 2): the control plane is the sole cron driver — it wakes
-            # sleeping pods when a job is due and force-runs it (in-pod scheduler
-            # disabled at onboarding), so cron works with scale-to-zero.
+            # Cron (Phase 2): the in-pod scheduler fires jobs; the control plane wakes
+            # sleeping pods shortly BEFORE their next slot so the scheduler is up to
+            # fire it — so cron works with scale-to-zero.
             - name: REAPER_TICK
               value: "60s"
             - name: CRON_TICK
               value: "30s"
             - name: CRON_WAKE_LEAD
-              value: "0s"
+              value: "3m"   # wake sleeping pods this far before a slot (must exceed cold start)
             - name: COOKIE_KEY
               valueFrom:
                 secretKeyRef:

@@ -40,7 +40,7 @@ func loadConfig() Config {
 		ColdStartTimeout: envDuration("COLD_START_TIMEOUT", 90*time.Second),
 		ReaperTick:       envDuration("REAPER_TICK", 60*time.Second),
 		CronTick:         envDuration("CRON_TICK", 30*time.Second),
-		CronWakeLead:     envDuration("CRON_WAKE_LEAD", 0),
+		CronWakeLead:     envDuration("CRON_WAKE_LEAD", 3*time.Minute),
 		CronRunBuffer:    envDuration("CRON_RUN_BUFFER", 90*time.Second),
 	}
 }

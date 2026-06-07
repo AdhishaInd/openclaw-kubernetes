@@ -37,9 +37,9 @@ except: print(0)"; }
 replicas(){ kubectl -n $NS get deploy/$DEP -o jsonpath='{.spec.replicas}' 2>/dev/null; }
 cronnext(){ kubectl -n $NS get deploy/$DEP -o jsonpath='{.metadata.annotations.openclaw\.io/cron-next}' 2>/dev/null; }
 
-log "adding --every 2m cron job"
+log "adding --every 3m cron job"
 touch_act
-kubectl -n $NS exec deploy/$DEP -c gateway -- node openclaw.mjs cron add --name t --every 2m \
+kubectl -n $NS exec deploy/$DEP -c gateway -- node openclaw.mjs cron add --name t --every 3m \
   --message "ping" --best-effort-deliver --json >/dev/null 2>&1
 firstjob(){ python3 -c "import sys,json
 s=sys.stdin.read(); i=s.find('{')
@@ -67,36 +67,41 @@ CN=$(cronnext)
 log "pod ASLEEP (replicas=0). cron-next annotation = ${CN:-<unset>}"
 [ -n "$CN" ] || { log "FAIL: cron-next annotation not stamped on scale-down"; exit 1; }
 
-# PHASE 2: do NOT touch the pod; verify the control plane wakes it and force-runs
-# the due job. The authoritative signal is the control plane's "cron fired" log
-# (race-free, unlike polling the churning pod's run history).
-log "PHASE 2: watching control plane for a scheduler-driven cron fire (no user activity)…"
-woke=0; fired=0
-for i in $(seq 1 48); do          # up to ~4 min
-  logs=$(kubectl -n oc-system logs deploy/controlplane --since=12m 2>/dev/null)
-  echo "$logs" | grep -q "cron wake user=$ID"  && woke=1
-  if echo "$logs" | grep -q "cron fired user=$ID"; then fired=1; break; fi
+# PHASE 2: the control plane wakes the slept pod shortly before its slot (logged as
+# "cron wake user=<id> for slot") and the in-pod scheduler fires the job. We assert
+# (1) the waker fired (durable control-plane log), then (2) a run was recorded —
+# read from a STABLY warm pod (querying mid-churn returns empty execs).
+log "PHASE 2: waiting for the control-plane waker (cron wake)…"
+# Reliable "did it run" signal: cron list --json exposes state.lastRunAtMs once the
+# in-pod scheduler has fired the job (cron runs --json is unreliable here).
+fired_check(){ kubectl -n $NS exec deploy/$DEP -c gateway -- node openclaw.mjs cron list --json 2>/dev/null \
+  | python3 -c "import sys,json
+s=sys.stdin.read(); i=s.find('{')
+try: print(1 if json.loads(s[i:] if i>=0 else s)['jobs'][0].get('state',{}).get('lastRunAtMs',0)>0 else 0)
+except: print(0)"; }
+woke=0
+for i in $(seq 1 50); do          # up to ~4 min (cron every 3m + wake lead)
+  kubectl -n oc-system logs deploy/controlplane --since=15m 2>/dev/null | grep -q "cron wake user=$ID for slot" && { woke=1; break; }
   sleep 5
 done
+log "waker observed=$woke; letting the in-pod scheduler reach + fire its slot…"
+sleep 75
 
-# Secondary confirmation: the run is recorded in the pod's own history.
-runs="?"
-if [ "$fired" = "1" ]; then
-  kubectl -n $NS scale deploy/$DEP --replicas=1 >/dev/null 2>&1
-  if kubectl -n $NS rollout status deploy/$DEP --timeout=120s >/dev/null 2>&1; then
-    touch_act
-    runs=$(kubectl -n $NS exec deploy/$DEP -c gateway -- node openclaw.mjs cron runs --id "$JOB" --json 2>/dev/null \
-      | python3 -c "import sys,json
-s=sys.stdin.read(); i=s.find('{')
-try: print(len(json.loads(s[i:] if i>=0 else s).get('entries',[])))
-except: print('?')")
-  fi
-fi
+# Stable read: keep the pod warm (waker/reaper leave a warm, recently-active pod
+# alone), let the gateway settle, then read the run history with retries.
+kubectl -n $NS scale deploy/$DEP --replicas=1 >/dev/null 2>&1
+kubectl -n $NS rollout status deploy/$DEP --timeout=150s >/dev/null 2>&1
+fired=0
+for t in 1 2 3 4 5; do
+  touch_act
+  sleep 6
+  [ "$(fired_check)" = "1" ] && { fired=1; break; }
+done
 
-log "result: woke=$woke fired=$fired pod_run_history=$runs"
-if [ "$fired" = "1" ]; then
-  log "PASS: control plane woke the slept pod and force-ran the cron job on schedule."
+log "result: woke=$woke fired=$fired"
+if [ "$woke" = "1" ] && [ "$fired" = "1" ]; then
+  log "PASS: pod slept, control plane woke it before its slot, and the cron job fired."
   exit 0
 fi
-log "FAIL: no scheduler-driven cron fire observed after scale-to-zero."
+log "FAIL: cron did not fire after scale-to-zero (woke=$woke fired=$fired)."
 exit 1
