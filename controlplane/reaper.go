@@ -10,7 +10,7 @@ import (
 // as active while its last-activity annotation is within the idle timeout; the
 // proxy refreshes that annotation on every request (including live WebSockets).
 func (s *Server) runReaper(ctx context.Context) {
-	tick := time.NewTicker(60 * time.Second)
+	tick := time.NewTicker(s.cfg.ReaperTick)
 	defer tick.Stop()
 	for {
 		select {
@@ -33,6 +33,9 @@ func (s *Server) reapOnce(ctx context.Context) {
 		if d.Spec.Replicas == nil || *d.Spec.Replicas == 0 {
 			continue // already asleep
 		}
+		if d.Annotations[annCronRunning] == "1" {
+			continue // held up for a cron slot — don't reap mid-run
+		}
 		last, err := time.Parse(time.RFC3339, d.Annotations[annLastActive])
 		if err != nil {
 			last = d.CreationTimestamp.Time // missing/invalid annotation: fall back to creation
@@ -41,6 +44,9 @@ func (s *Server) reapOnce(ctx context.Context) {
 			continue
 		}
 		id := d.Labels[labelUser]
+		// Capture the cron schedule while the pod is still up, so the scheduler
+		// can wake it for due jobs while it sleeps.
+		s.refreshMirror(ctx, id)
 		if err := s.k8s.scaleTo(ctx, id, 0); err != nil {
 			log.Printf("reaper scale-down user=%s: %v", id, err)
 			continue

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -15,8 +16,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/remotecommand"
 )
 
 const (
@@ -24,6 +27,8 @@ const (
 	labelManagedBy = "openclaw.io/managed-by"
 	annEmail       = "openclaw.io/email"
 	annLastActive  = "openclaw.io/last-activity"
+	annCronNext    = "openclaw.io/cron-next"    // earliest enabled cron nextRunAtMs (epoch ms)
+	annCronRunning = "openclaw.io/cron-running" // "1" while held up for a cron slot
 	managedByValue = "controlplane"
 	sharedKeyField = "anthropic-key"
 )
@@ -31,6 +36,7 @@ const (
 // K8s wraps a clientset plus the control-plane config.
 type K8s struct {
 	cs  kubernetes.Interface
+	rc  *rest.Config
 	cfg Config
 }
 
@@ -50,7 +56,72 @@ func newK8s(cfg Config) (*K8s, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &K8s{cs: cs, cfg: cfg}, nil
+	return &K8s{cs: cs, rc: rc, cfg: cfg}, nil
+}
+
+// execInGateway runs a command in the gateway container of a running pod for the
+// user and returns combined stdout.
+func (k *K8s) execInGateway(ctx context.Context, id string, command ...string) (string, error) {
+	pods, err := k.cs.CoreV1().Pods(k.cfg.UsersNS).List(ctx, metav1.ListOptions{LabelSelector: labelUser + "=" + id})
+	if err != nil {
+		return "", err
+	}
+	var podName string
+	for _, p := range pods.Items {
+		if p.Status.Phase == corev1.PodRunning {
+			podName = p.Name
+			break
+		}
+	}
+	if podName == "" {
+		return "", fmt.Errorf("no running pod for user %s", id)
+	}
+	req := k.cs.CoreV1().RESTClient().Post().Resource("pods").Name(podName).Namespace(k.cfg.UsersNS).
+		SubResource("exec").VersionedParams(&corev1.PodExecOptions{
+		Container: "gateway", Command: command, Stdout: true, Stderr: true,
+	}, scheme.ParameterCodec)
+	executor, err := remotecommand.NewSPDYExecutor(k.rc, "POST", req.URL())
+	if err != nil {
+		return "", err
+	}
+	var stdout, stderr bytes.Buffer
+	if err := executor.StreamWithContext(ctx, remotecommand.StreamOptions{Stdout: &stdout, Stderr: &stderr}); err != nil {
+		return stdout.String(), fmt.Errorf("%w: %s", err, stderr.String())
+	}
+	return stdout.String(), nil
+}
+
+// getDeploy fetches a user's Deployment.
+func (k *K8s) getDeploy(ctx context.Context, id string) (*appsv1.Deployment, error) {
+	return k.cs.AppsV1().Deployments(k.cfg.UsersNS).Get(ctx, deployName(id), metav1.GetOptions{})
+}
+
+// setAnnotations merge-patches annotations on a user's Deployment. A nil value
+// (empty string mapped via JSON null) removes the key.
+func (k *K8s) setAnnotations(ctx context.Context, id string, anns map[string]*string) error {
+	parts := make([]string, 0, len(anns))
+	for key, val := range anns {
+		if val == nil {
+			parts = append(parts, fmt.Sprintf("%q:null", key))
+		} else {
+			parts = append(parts, fmt.Sprintf("%q:%q", key, *val))
+		}
+	}
+	patch := fmt.Sprintf(`{"metadata":{"annotations":{%s}}}`, joinComma(parts))
+	_, err := k.cs.AppsV1().Deployments(k.cfg.UsersNS).Patch(
+		ctx, deployName(id), types.MergePatchType, []byte(patch), metav1.PatchOptions{})
+	return err
+}
+
+func joinComma(s []string) string {
+	out := ""
+	for i, v := range s {
+		if i > 0 {
+			out += ","
+		}
+		out += v
+	}
+	return out
 }
 
 // userID is a DNS-safe, stable id derived from the email.
@@ -166,6 +237,10 @@ node openclaw.mjs config set gateway.controlUi.allowedOrigins "[\"$PUBLIC_ORIGIN
 # (the in-pod CLI can't see the live gateway's pending requests), so this is the only
 # workable option for self-serve.
 node openclaw.mjs config set gateway.controlUi.dangerouslyDisableDeviceAuth true
+# Disable the in-pod cron scheduler: the control plane is the sole cron driver
+# (it wakes the pod and force-runs due jobs), which is what makes cron work with
+# scale-to-zero without missed or double runs.
+node openclaw.mjs config set cron.enabled false
 echo "onboarded"`
 
 	env := []corev1.EnvVar{

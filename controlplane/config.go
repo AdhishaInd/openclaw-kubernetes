@@ -17,6 +17,10 @@ type Config struct {
 	CookieKey        []byte        // HMAC key for signing session cookies
 	IdleTimeout      time.Duration // scale a user pod to 0 after this much inactivity
 	ColdStartTimeout time.Duration // how long to wait for a pod to become ready on wake
+	ReaperTick       time.Duration // how often the idle reaper runs
+	CronTick         time.Duration // how often the cron scheduler checks for due jobs
+	CronWakeLead     time.Duration // wake a sleeping pod this long before a cron slot
+	CronRunBuffer    time.Duration // keep the pod up this long past the slot for the run
 }
 
 func loadConfig() Config {
@@ -30,6 +34,10 @@ func loadConfig() Config {
 		CookieKey:        []byte(env("COOKIE_KEY", "dev-insecure-cookie-key-change-me")),
 		IdleTimeout:      envDuration("IDLE_TIMEOUT", 15*time.Minute),
 		ColdStartTimeout: envDuration("COLD_START_TIMEOUT", 90*time.Second),
+		ReaperTick:       envDuration("REAPER_TICK", 60*time.Second),
+		CronTick:         envDuration("CRON_TICK", 30*time.Second),
+		CronWakeLead:     envDuration("CRON_WAKE_LEAD", 0),
+		CronRunBuffer:    envDuration("CRON_RUN_BUFFER", 90*time.Second),
 	}
 }
 

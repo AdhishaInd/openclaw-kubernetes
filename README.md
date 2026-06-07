@@ -58,6 +58,28 @@ Tear down with `make down` (keeps the cluster). Override the provider with
 - **Scale-to-zero**: the proxy wakes a pod on request (showing a readiness-polling
   interstitial) and the reaper scales it back down after `IDLE_TIMEOUT`.
 
+### Cron with scale-to-zero (Phase 2)
+
+OpenClaw's cron scheduler runs *inside* the gateway and does not catch up missed
+slots — so a pod scaled to zero would never fire its jobs. Instead, the control
+plane is the **sole cron driver**:
+
+- The in-pod scheduler is disabled at onboarding (`cron.enabled=false`), so there
+  is no natural firing (hence no double-fire).
+- While a pod is awake (and once more just before the reaper sleeps it), the
+  control plane reads `cron list --json` and stamps the earliest next-fire time
+  onto the Deployment (`openclaw.io/cron-next`).
+- A scheduler loop wakes a sleeping pod when a job is due and **force-runs** it
+  (`cron run <id>`), then advances the mirror and releases the pod back to the
+  reaper. A guard annotation stops the reaper from sleeping a pod mid-run.
+
+Net effect: a cron user's pod only wakes around its scheduled times (plus the run
+and a short grace), so **scale-to-zero is preserved**. Cold-start time just delays
+a run by a few tens of seconds — it can't cause a miss. Knobs: `CRON_TICK`,
+`CRON_WAKE_LEAD`, `REAPER_TICK` (see the Deployment). Verify with `make verify-cron`
+(no browser). Note: headless cron should use `--webhook` (or a channel) for
+delivery, since the default "post to last chat channel" has nowhere to go.
+
 ### How a user connects
 
 `session cookie → per-user gateway token (delivered via #token= redirect, the
@@ -126,9 +148,8 @@ mainly changes how the image and ingress are handled:
 
 ## Roadmap
 
-- **Phase 2 — cron**: a sleeping pod can't fire its own scheduled jobs. Plan: an
-  external waker (control plane / cluster CronJob) holds each user's schedule and
-  wakes their pod on time.
+- **Phase 2 — cron**: ✅ done — the control plane wakes sleeping pods and force-runs
+  due jobs (see [Cron with scale-to-zero](#cron-with-scale-to-zero-phase-2)).
 - **Phase 3 — messaging**: webhook channels (Discord/Slack) can wake-on-webhook;
   long-poll channels (Telegram/WhatsApp) need an always-on per-channel receiver
   shim, which partially defeats scale-to-zero for those users.
