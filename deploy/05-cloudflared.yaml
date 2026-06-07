@@ -1,0 +1,43 @@
+# Public HTTPS for the control plane via a cloudflared quick tunnel (no account).
+# The control plane reads the printed https://<random>.trycloudflare.com URL from
+# this pod's logs and uses it as the Telegram webhook base. The URL is EPHEMERAL —
+# it changes whenever this pod restarts (users must re-connect their channel then).
+# For a stable URL, switch to a named tunnel with Cloudflare credentials.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: oc-system
+  labels:
+    app: cloudflared
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cloudflared
+  template:
+    metadata:
+      labels:
+        app: cloudflared
+    spec:
+      containers:
+        - name: cloudflared
+          image: cloudflare/cloudflared:latest
+          args:
+            - tunnel
+            - --no-autoupdate
+            - --url
+            - http://controlplane.oc-system.svc:8080
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]

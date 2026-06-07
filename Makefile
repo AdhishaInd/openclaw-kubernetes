@@ -18,3 +18,8 @@ verify:
 #   kubectl -n oc-system set env deploy/controlplane IDLE_TIMEOUT=45s REAPER_TICK=10s CRON_TICK=15s
 verify-cron:
 	@./test/verify-cron.sh
+
+# Phase 3 behavioral test: a Telegram update wakes a slept pod (wake-on-webhook).
+# Needs TELEGRAM_BOT_TOKEN set and short timings (IDLE_TIMEOUT/REAPER_TICK).
+verify-telegram:
+	@./test/verify-telegram.sh

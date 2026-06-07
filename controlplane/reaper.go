@@ -33,7 +33,7 @@ func (s *Server) reapOnce(ctx context.Context) {
 		if d.Spec.Replicas == nil || *d.Spec.Replicas == 0 {
 			continue // already asleep
 		}
-		if d.Annotations[annCronRunning] == "1" {
+		if d.Annotations[annBusy] == "1" {
 			continue // held up for a cron slot — don't reap mid-run
 		}
 		last, err := time.Parse(time.RFC3339, d.Annotations[annLastActive])

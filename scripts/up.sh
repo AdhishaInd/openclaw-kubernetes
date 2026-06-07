@@ -72,6 +72,7 @@ kubectl -n oc-users create secret generic oc-shared-anthropic \
 say "Deploying control plane"
 kubectl apply -f deploy/03-controlplane.yaml
 kubectl apply -f deploy/04-user-networkpolicy.yaml
+kubectl apply -f deploy/05-cloudflared.yaml   # public HTTPS tunnel for Telegram webhooks
 kubectl -n oc-system rollout status deploy/controlplane --timeout=180s
 
 printf '\n\033[1;32mReady.\033[0m Open:  http://localhost:%s/signup\n\n' "$LOCAL_PORT"

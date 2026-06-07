@@ -143,6 +143,16 @@ func (s *Server) cachedReady(ctx context.Context, id string) bool {
 	return true
 }
 
+// wakeAndWait scales a user's pod to 1 and waits for it to become ready.
+// Shared by the cron scheduler and the Telegram webhook receiver.
+func (s *Server) wakeAndWait(ctx context.Context, id string) bool {
+	if err := s.k8s.scaleTo(ctx, id, 1); err != nil {
+		log.Printf("wake scale user=%s: %v", id, err)
+		return false
+	}
+	return s.waitReady(ctx, id)
+}
+
 // waitReady polls until the pod is ready or the cold-start timeout elapses.
 func (s *Server) waitReady(ctx context.Context, id string) bool {
 	ctx, cancel := context.WithTimeout(ctx, s.cfg.ColdStartTimeout)

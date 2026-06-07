@@ -113,7 +113,7 @@ func (s *Server) cronTick(ctx context.Context) {
 			continue
 		}
 		asleep := d.Spec.Replicas == nil || *d.Spec.Replicas == 0
-		running := d.Annotations[annCronRunning] == "1"
+		running := d.Annotations[annBusy] == "1"
 		// Wake once the slot is due (within a small lead). The in-pod scheduler is
 		// disabled, so we force-run due jobs ourselves after the pod is ready —
 		// cold-start time just delays the run slightly, it can't cause a miss.
@@ -131,18 +131,14 @@ func (s *Server) wakeForCron(id string) {
 	defer cancel()
 
 	one := "1"
-	if err := s.k8s.setAnnotations(ctx, id, map[string]*string{annCronRunning: &one}); err != nil {
+	if err := s.k8s.setAnnotations(ctx, id, map[string]*string{annBusy: &one}); err != nil {
 		log.Printf("cron wake guard user=%s: %v", id, err)
 		return
 	}
-	defer s.k8s.setAnnotations(ctx, id, map[string]*string{annCronRunning: nil})
+	defer s.k8s.setAnnotations(ctx, id, map[string]*string{annBusy: nil})
 
 	log.Printf("cron wake user=%s", id)
-	if err := s.k8s.scaleTo(ctx, id, 1); err != nil {
-		log.Printf("cron wake scale user=%s: %v", id, err)
-		return
-	}
-	if !s.waitReady(ctx, id) {
+	if !s.wakeAndWait(ctx, id) {
 		log.Printf("cron wake user=%s: pod not ready in time", id)
 		return
 	}

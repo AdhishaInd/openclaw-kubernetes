@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenClaw — Channels</title>
+<style>
+  body{font-family:system-ui,sans-serif;background:#0f1115;color:#e6e6e6;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
+  .card{background:#181b22;padding:2rem;border-radius:12px;width:420px;box-shadow:0 8px 30px rgba(0,0,0,.4)}
+  h1{font-size:1.25rem;margin:0 0 .25rem}
+  .sub{color:#9aa4b2;font-size:.85rem;margin-bottom:1.25rem}
+  label{display:block;font-size:.8rem;margin:.75rem 0 .25rem;color:#9aa4b2}
+  input{width:100%;box-sizing:border-box;padding:.6rem;border:1px solid #2a2f3a;border-radius:8px;background:#0f1115;color:#e6e6e6}
+  button{width:100%;margin-top:1rem;padding:.65rem;border:0;border-radius:8px;background:#5b8cff;color:#fff;font-weight:600;cursor:pointer}
+  button:disabled{opacity:.6;cursor:default}
+  .hint{font-size:.72rem;color:#6b7280;margin-top:.35rem}
+  .status{margin:.5rem 0 1rem;font-size:.85rem;padding:.5rem .7rem;border-radius:8px}
+  .ok{background:#16331f;color:#7ee2a0}
+  .out{margin-top:1rem;font-size:.8rem;white-space:pre-wrap;color:#9aa4b2}
+  a{color:#5b8cff}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Telegram</h1>
+    <div class="sub">Connect your own Telegram bot. Messages reach your assistant; your instance wakes on demand.</div>
+    {{with .}}{{if .Connected}}<div class="status ok">✓ Telegram is connected for your account. Submitting again re-registers it.</div>{{end}}{{end}}
+    <form id="f">
+      <label for="t">Bot token (from @BotFather)</label>
+      <input id="t" name="bot_token" type="password" placeholder="123456789:AA..." autocomplete="off" required>
+      <div class="hint">In Telegram, message @BotFather → /newbot → copy the token. It's stored only for your instance.</div>
+      <button id="b" type="submit">Connect Telegram</button>
+    </form>
+    <div class="out" id="o"></div>
+    <div class="sub" style="margin-top:1rem"><a href="/">← back to your OpenClaw</a></div>
+  </div>
+  <script>
+  const f=document.getElementById('f'),b=document.getElementById('b'),o=document.getElementById('o');
+  f.addEventListener('submit',async (e)=>{
+    e.preventDefault();
+    b.disabled=true; b.textContent='Connecting… (~30–60s)'; o.textContent='';
+    try{
+      const body=new URLSearchParams({bot_token:document.getElementById('t').value});
+      const r=await fetch('/connect/telegram',{method:'POST',body,headers:{'Content-Type':'application/x-www-form-urlencoded'}});
+      o.textContent=(r.ok?'✓ ':'✗ ')+(await r.text());
+      if(r.ok){ b.textContent='Connected'; } else { b.disabled=false; b.textContent='Connect Telegram'; }
+    }catch(err){ o.textContent='✗ '+err; b.disabled=false; b.textContent='Connect Telegram'; }
+  });
+  </script>
+</body>
+</html>

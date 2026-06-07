@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"regexp"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -27,8 +30,8 @@ const (
 	labelManagedBy = "openclaw.io/managed-by"
 	annEmail       = "openclaw.io/email"
 	annLastActive  = "openclaw.io/last-activity"
-	annCronNext    = "openclaw.io/cron-next"    // earliest enabled cron nextRunAtMs (epoch ms)
-	annCronRunning = "openclaw.io/cron-running" // "1" while held up for a cron slot
+	annCronNext    = "openclaw.io/cron-next" // earliest enabled cron nextRunAtMs (epoch ms)
+	annBusy        = "openclaw.io/busy"      // "1" while held up for cron/webhook work (reaper skips)
 	managedByValue = "controlplane"
 	sharedKeyField = "anthropic-key"
 )
@@ -89,6 +92,52 @@ func (k *K8s) execInGateway(ctx context.Context, id string, command ...string) (
 		return stdout.String(), fmt.Errorf("%w: %s", err, stderr.String())
 	}
 	return stdout.String(), nil
+}
+
+// patchSecretData merge-patches string fields into a user's Secret.
+func (k *K8s) patchSecretData(ctx context.Context, id string, data map[string]string) error {
+	enc := make(map[string]string, len(data))
+	for k2, v := range data {
+		enc[k2] = base64.StdEncoding.EncodeToString([]byte(v))
+	}
+	b, _ := json.Marshal(map[string]any{"data": enc})
+	_, err := k.cs.CoreV1().Secrets(k.cfg.UsersNS).Patch(
+		ctx, secretName(id), types.MergePatchType, b, metav1.PatchOptions{})
+	return err
+}
+
+var trycloudflareRe = regexp.MustCompile(`https://[a-z0-9-]+\.trycloudflare\.com`)
+
+// discoverTunnelURL reads the in-cluster cloudflared pod's logs and extracts the
+// public quick-tunnel URL it printed at startup.
+func (k *K8s) discoverTunnelURL(ctx context.Context, systemNS string) (string, error) {
+	pods, err := k.cs.CoreV1().Pods(systemNS).List(ctx, metav1.ListOptions{LabelSelector: "app=cloudflared"})
+	if err != nil {
+		return "", err
+	}
+	for _, p := range pods.Items {
+		if p.Status.Phase != corev1.PodRunning {
+			continue
+		}
+		raw, err := k.cs.CoreV1().Pods(systemNS).GetLogs(p.Name, &corev1.PodLogOptions{}).DoRaw(ctx)
+		if err != nil {
+			continue
+		}
+		if m := trycloudflareRe.Find(raw); m != nil {
+			return string(m), nil
+		}
+	}
+	return "", fmt.Errorf("no trycloudflare URL found in cloudflared logs yet")
+}
+
+// restart triggers a rolling restart of a user's Deployment (Recreate strategy)
+// by bumping a pod-template annotation, so the gateway re-reads config on start.
+func (k *K8s) restart(ctx context.Context, id string) error {
+	patch := fmt.Sprintf(`{"spec":{"template":{"metadata":{"annotations":{"openclaw.io/restarted-at":%q}}}}}`,
+		time.Now().UTC().Format(time.RFC3339Nano))
+	_, err := k.cs.AppsV1().Deployments(k.cfg.UsersNS).Patch(
+		ctx, deployName(id), types.MergePatchType, []byte(patch), metav1.PatchOptions{})
+	return err
 }
 
 // getDeploy fetches a user's Deployment.
@@ -200,9 +249,10 @@ func (k *K8s) createUserResources(ctx context.Context, id, email, passwordHash, 
 		ObjectMeta: metav1.ObjectMeta{Name: serviceName(id), Labels: labels},
 		Spec: corev1.ServiceSpec{
 			Selector: map[string]string{labelUser: id},
-			Ports: []corev1.ServicePort{{
-				Name: "gateway", Port: 18789, TargetPort: intstr.FromInt(18789),
-			}},
+			Ports: []corev1.ServicePort{
+				{Name: "gateway", Port: 18789, TargetPort: intstr.FromInt(18789)},
+				{Name: "tg-webhook", Port: 8787, TargetPort: intstr.FromInt(8787)},
+			},
 		},
 	}
 	if err := create(k.cs.CoreV1().Services(k.cfg.UsersNS).Create, ctx, svc); err != nil {

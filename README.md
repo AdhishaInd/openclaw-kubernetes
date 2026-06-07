@@ -80,6 +80,32 @@ a run by a few tens of seconds — it can't cause a miss. Knobs: `CRON_TICK`,
 (no browser). Note: headless cron should use `--webhook` (or a channel) for
 delivery, since the default "post to last chat channel" has nowhere to go.
 
+### Telegram with scale-to-zero (Phase 3)
+
+A sleeping pod can't long-poll Telegram, so we use **webhook mode + wake-on-webhook**:
+
+- A user connects their own bot on the **`/channels`** page (paste the @BotFather
+  token). The control plane stores it, writes the channel config into the pod with
+  `webhookUrl` pointing back at the control plane, and restarts the gateway so it
+  registers the webhook with Telegram (`setWebhook`).
+- Telegram then POSTs updates to **`/tg/<userId>`** on the control plane (always-on,
+  public HTTPS). The control plane verifies the per-user secret, **wakes the pod**
+  (same primitive as cron), and forwards the update to the pod's
+  `:8787/telegram-webhook` listener (retrying until it's up after cold start). The
+  agent replies to Telegram directly; the reaper sleeps the pod again afterward.
+
+Public HTTPS is provided by an **in-cluster cloudflared quick tunnel**
+(`deploy/05-cloudflared.yaml`); the control plane auto-discovers the
+`https://….trycloudflare.com` URL from cloudflared's logs — no manual step. Verify
+with `make verify-telegram` (set `TELEGRAM_BOT_TOKEN`; it POSTs a synthetic update
+and asserts wake+forward). First message after idle has the usual ~30–60s cold-start
+delay. Only **webhook-mode** channels (Telegram, Slack, Teams, Line, …) fit
+scale-to-zero; persistent-connection ones (Discord, WhatsApp-web) would need an
+always-on shim and are out of scope.
+
+> The cloudflared quick-tunnel URL changes on restart; users re-connect (re-register)
+> their bot afterward. Use a named Cloudflare tunnel for a stable URL in production.
+
 ### How a user connects
 
 `session cookie → per-user gateway token (delivered via #token= redirect, the
@@ -150,9 +176,10 @@ mainly changes how the image and ingress are handled:
 
 - **Phase 2 — cron**: ✅ done — the control plane wakes sleeping pods and force-runs
   due jobs (see [Cron with scale-to-zero](#cron-with-scale-to-zero-phase-2)).
-- **Phase 3 — messaging**: webhook channels (Discord/Slack) can wake-on-webhook;
-  long-poll channels (Telegram/WhatsApp) need an always-on per-channel receiver
-  shim, which partially defeats scale-to-zero for those users.
+- **Phase 3 — messaging**: ✅ Telegram via webhook + wake-on-webhook (see
+  [Telegram with scale-to-zero](#telegram-with-scale-to-zero-phase-3)). Other
+  webhook channels (Slack/Teams/Line) follow the same pattern; persistent-connection
+  channels (Discord/WhatsApp-web) need an always-on shim and remain out of scope.
 
 ## License
 

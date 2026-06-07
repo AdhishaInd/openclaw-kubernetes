@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os/signal"
+	"sync"
 	"syscall"
 )
 
@@ -15,10 +16,35 @@ var webFS embed.FS
 
 // Server is the control plane: auth + provisioning + activating proxy + reaper.
 type Server struct {
-	cfg   Config
-	k8s   *K8s
-	tmpl  *template.Template
-	ps    *proxyState
+	cfg  Config
+	k8s  *K8s
+	tmpl *template.Template
+	ps   *proxyState
+
+	tunnelMu  sync.Mutex
+	tunnelURL string // cached public webhook base discovered from cloudflared
+}
+
+// webhookBase returns the public HTTPS base URL for Telegram webhooks: the
+// configured override if set, otherwise the in-cluster cloudflared tunnel URL
+// (discovered from its logs and cached).
+func (s *Server) webhookBase(ctx context.Context) string {
+	if s.cfg.TelegramBase != "" {
+		return s.cfg.TelegramBase
+	}
+	s.tunnelMu.Lock()
+	defer s.tunnelMu.Unlock()
+	if s.tunnelURL != "" {
+		return s.tunnelURL
+	}
+	u, err := s.k8s.discoverTunnelURL(ctx, s.cfg.SystemNS)
+	if err != nil {
+		log.Printf("tunnel discovery: %v", err)
+		return ""
+	}
+	s.tunnelURL = u
+	log.Printf("discovered webhook base: %s", u)
+	return u
 }
 
 func main() {
@@ -49,6 +75,9 @@ func main() {
 	mux.HandleFunc("/logout", s.handleLogout)
 	mux.HandleFunc(seedPath, s.handleSeedJS)      // same-origin token seed (CSP-safe)
 	mux.HandleFunc("/__oc-ready", s.handleReadyCheck) // wake interstitial readiness poll
+	mux.HandleFunc("/tg/", s.handleTelegramWebhook)   // Telegram wake-on-webhook receiver
+	mux.HandleFunc("/channels", s.handleChannelsPage) // self-serve channel setup UI
+	mux.HandleFunc("/connect/telegram", s.handleConnectTelegram)
 	mux.HandleFunc("/sw.js", s.handleNoopSW)      // neuter OpenClaw's caching service worker
 	mux.HandleFunc("/", s.handleApp)         // catch-all: authenticated reverse proxy
 
