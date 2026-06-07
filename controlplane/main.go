@@ -77,6 +77,8 @@ func main() {
 	mux.HandleFunc("/__oc-ready", s.handleReadyCheck) // wake interstitial readiness poll
 	mux.HandleFunc("/tg/", s.handleTelegramWebhook)   // Telegram wake-on-webhook receiver
 	mux.HandleFunc("/channels", s.handleChannelsPage) // self-serve channel setup UI
+	mux.HandleFunc("/channels/pairings", s.handlePairingsList)
+	mux.HandleFunc("/channels/approve", s.handlePairingApprove)
 	mux.HandleFunc("/connect/telegram", s.handleConnectTelegram)
 	mux.HandleFunc("/sw.js", s.handleNoopSW)      // neuter OpenClaw's caching service worker
 	mux.HandleFunc("/", s.handleApp)         // catch-all: authenticated reverse proxy

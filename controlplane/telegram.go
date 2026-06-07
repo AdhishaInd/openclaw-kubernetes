@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -25,6 +27,85 @@ func (s *Server) handleChannelsPage(w http.ResponseWriter, r *http.Request) {
 		connected = len(sec.Data["telegram-webhook-secret"]) > 0
 	}
 	s.renderPage(w, "channels.html", map[string]any{"Connected": connected})
+}
+
+var pairingCodeRe = regexp.MustCompile(`^[A-Za-z0-9]{4,32}$`)
+
+// handlePairingsList returns the tenant's pending Telegram DM pairing requests so
+// the user can approve them from the /channels page.
+func (s *Server) handlePairingsList(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.sessionUser(r)
+	if !ok {
+		http.Error(w, "unauthenticated", http.StatusUnauthorized)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.ColdStartTimeout+30*time.Second)
+	defer cancel()
+	one := "1"
+	s.k8s.setAnnotations(ctx, id, map[string]*string{annBusy: &one})
+	defer s.k8s.setAnnotations(context.Background(), id, map[string]*string{annBusy: nil})
+	if !s.wakeAndWait(ctx, id) {
+		http.Error(w, "instance starting", http.StatusServiceUnavailable)
+		return
+	}
+	s.touchActivity(ctx, id)
+	out, err := s.k8s.execInGateway(ctx, id, "node", "openclaw.mjs", "pairing", "list", "--channel", "telegram", "--json")
+	if err != nil {
+		http.Error(w, "list failed", http.StatusBadGateway)
+		return
+	}
+	var parsed struct {
+		Requests []struct {
+			ID   string `json:"id"`
+			Code string `json:"code"`
+			Meta struct {
+				FirstName string `json:"firstName"`
+				LastName  string `json:"lastName"`
+			} `json:"meta"`
+		} `json:"requests"`
+	}
+	if err := json.Unmarshal([]byte(jsonSlice(out)), &parsed); err != nil {
+		http.Error(w, "parse failed", http.StatusBadGateway)
+		return
+	}
+	type req struct{ Code, ID, Name string }
+	reqs := []req{}
+	for _, p := range parsed.Requests {
+		name := strings.TrimSpace(p.Meta.FirstName + " " + p.Meta.LastName)
+		reqs = append(reqs, req{Code: p.Code, ID: p.ID, Name: name})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"requests": reqs})
+}
+
+// handlePairingApprove approves a pending Telegram DM pairing code for the user.
+func (s *Server) handlePairingApprove(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.sessionUser(r)
+	if !ok {
+		http.Error(w, "unauthenticated", http.StatusUnauthorized)
+		return
+	}
+	_ = r.ParseForm()
+	code := strings.TrimSpace(r.PostFormValue("code"))
+	if !pairingCodeRe.MatchString(code) {
+		http.Error(w, "invalid code", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.ColdStartTimeout+30*time.Second)
+	defer cancel()
+	one := "1"
+	s.k8s.setAnnotations(ctx, id, map[string]*string{annBusy: &one})
+	defer s.k8s.setAnnotations(context.Background(), id, map[string]*string{annBusy: nil})
+	if !s.wakeAndWait(ctx, id) {
+		http.Error(w, "instance starting", http.StatusServiceUnavailable)
+		return
+	}
+	if _, err := s.k8s.execInGateway(ctx, id, "node", "openclaw.mjs", "pairing", "approve", "telegram", code, "--notify"); err != nil {
+		http.Error(w, "approve failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	log.Printf("telegram pairing approved user=%s code=%s", id, code)
+	fmt.Fprint(w, "approved")
 }
 
 // handleTelegramWebhook receives Telegram updates at POST /tg/<userId>, verifies

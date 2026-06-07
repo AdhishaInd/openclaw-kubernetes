@@ -94,6 +94,11 @@ A sleeping pod can't long-poll Telegram, so we use **webhook mode + wake-on-webh
   `:8787/telegram-webhook` listener (retrying until it's up after cold start). The
   agent replies to Telegram directly; the reaper sleeps the pod again afterward.
 
+OpenClaw also requires a one-time **DM pairing** approval for each new sender (so
+randoms can't use someone's assistant). The `/channels` page **surfaces pending
+pairing requests with an Approve button** (the control plane runs `pairing approve`
+in the pod), so it's self-serve — no shell access needed.
+
 Public HTTPS is provided by an **in-cluster cloudflared quick tunnel**
 (`deploy/05-cloudflared.yaml`); the control plane auto-discovers the
 `https://….trycloudflare.com` URL from cloudflared's logs — no manual step. Verify

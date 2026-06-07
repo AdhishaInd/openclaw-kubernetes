@@ -32,8 +32,24 @@
       <button id="b" type="submit">Connect Telegram</button>
     </form>
     <div class="out" id="o"></div>
+
+    <div style="margin-top:1.5rem;border-top:1px solid #2a2f3a;padding-top:1rem">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <strong style="font-size:.95rem">Pending DM approvals</strong>
+        <button id="refresh" style="width:auto;margin:0;padding:.3rem .6rem;font-size:.75rem;background:#2a2f3a">Refresh</button>
+      </div>
+      <div class="sub" style="margin-top:.25rem">New people who DM your bot need a one-time approval.</div>
+      <div id="pairings" style="margin-top:.5rem"></div>
+    </div>
+
     <div class="sub" style="margin-top:1rem"><a href="/">← back to your OpenClaw</a></div>
   </div>
+  <style>
+    .pair{display:flex;justify-content:space-between;align-items:center;gap:.5rem;background:#0f1115;border:1px solid #2a2f3a;border-radius:8px;padding:.5rem .7rem;margin-top:.4rem}
+    .pair .who{font-size:.82rem}
+    .pair .code{color:#6b7280;font-size:.72rem}
+    .pair button{width:auto;margin:0;padding:.35rem .7rem;font-size:.78rem}
+  </style>
   <script>
   const f=document.getElementById('f'),b=document.getElementById('b'),o=document.getElementById('o');
   f.addEventListener('submit',async (e)=>{
@@ -43,9 +59,40 @@
       const body=new URLSearchParams({bot_token:document.getElementById('t').value});
       const r=await fetch('/connect/telegram',{method:'POST',body,headers:{'Content-Type':'application/x-www-form-urlencoded'}});
       o.textContent=(r.ok?'✓ ':'✗ ')+(await r.text());
-      if(r.ok){ b.textContent='Connected'; } else { b.disabled=false; b.textContent='Connect Telegram'; }
+      if(r.ok){ b.textContent='Connected'; setTimeout(loadPairings,1000); } else { b.disabled=false; b.textContent='Connect Telegram'; }
     }catch(err){ o.textContent='✗ '+err; b.disabled=false; b.textContent='Connect Telegram'; }
   });
+
+  const pairings=document.getElementById('pairings');
+  async function approve(code,btn){
+    btn.disabled=true; btn.textContent='Approving…';
+    try{
+      await fetch('/channels/approve',{method:'POST',body:new URLSearchParams({code}),headers:{'Content-Type':'application/x-www-form-urlencoded'}});
+    }catch(e){}
+    loadPairings();
+  }
+  async function loadPairings(){
+    pairings.textContent='Checking…';
+    try{
+      const r=await fetch('/channels/pairings');
+      if(!r.ok){ pairings.innerHTML='<div class="sub">'+(r.status===503?'Waking instance…':'Unavailable')+'</div>'; return; }
+      const d=await r.json();
+      pairings.textContent='';
+      if(!d.requests||!d.requests.length){ pairings.innerHTML='<div class="sub">None.</div>'; return; }
+      d.requests.forEach(p=>{
+        const row=document.createElement('div'); row.className='pair';
+        const left=document.createElement('div');
+        const who=document.createElement('div'); who.className='who'; who.textContent=p.Name||('user '+p.ID);
+        const code=document.createElement('div'); code.className='code'; code.textContent='code '+p.Code;
+        left.appendChild(who); left.appendChild(code);
+        const btn=document.createElement('button'); btn.textContent='Approve';
+        btn.addEventListener('click',()=>approve(p.Code,btn));
+        row.appendChild(left); row.appendChild(btn); pairings.appendChild(row);
+      });
+    }catch(e){ pairings.innerHTML='<div class="sub">Unavailable</div>'; }
+  }
+  document.getElementById('refresh').addEventListener('click',loadPairings);
+  loadPairings();
   </script>
 </body>
 </html>
