@@ -16,13 +16,17 @@ in one gateway. A pod per user gives real OS/filesystem/network isolation.
 
 ## Quick start (local)
 
-Prereqs: Docker, `kubectl`, and one of **minikube**, **kind**, or **k3d**. You'll
-need an Anthropic API key (shared across tenants in this setup).
+Prereqs: `git`, Docker, `kubectl`, `openssl`, and one of **minikube**, **kind**, or
+**k3d**. You'll need an Anthropic API key (shared across tenants in this setup).
+
+From nothing — clone, enter, and bring up in one line:
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-... make up
-#   …or just `make up` and it'll prompt for the key.
+git clone https://github.com/AdhishaInd/openclaw-kubernetes.git && cd openclaw-kubernetes && ANTHROPIC_API_KEY=sk-ant-... make up
 ```
+
+(Already cloned? Just `ANTHROPIC_API_KEY=sk-ant-... make up`, or `make up` to be
+prompted for the key. Pick a provider with `CLUSTER=kind make up`.)
 
 That builds the control-plane image into your local cluster, generates a cookie
 signing key, creates the secrets (never written to the repo), deploys everything,
@@ -30,8 +34,7 @@ and port-forwards. Then open **http://localhost:8080/signup**, create an account
 and your private OpenClaw cold-starts (~60–90s the first time) and connects
 automatically.
 
-Tear down with `make down` (keeps the cluster). Override the provider with
-`CLUSTER=kind make up`.
+Tear down with `make down` (keeps the cluster).
 
 ## Architecture
 
