@@ -23,8 +23,9 @@ if [ -z "$CLUSTER" ]; then
   elif command -v k3d >/dev/null;      then CLUSTER=k3d
   else die "need one of: minikube, kind, or k3d (set CLUSTER= to choose)"; fi
 fi
-command -v kubectl >/dev/null || die "kubectl not found"
-command -v docker  >/dev/null || die "docker not found"
+for tool in kubectl docker openssl; do
+  command -v "$tool" >/dev/null || die "$tool not found (install it and re-run)"
+done
 say "Using cluster provider: $CLUSTER"
 
 # --- ensure the cluster exists/running, build + load the image ---
